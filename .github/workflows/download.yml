@@ -6,10 +6,11 @@ jobs:
     steps:
       - name: Pull and Save Image
         run: |
-          docker pull golang:1.22-alpine
-          docker save golang:1.22-alpine -o go_image.tar
+          docker pull kubernetesui/dashboard-api:latest
+          docker save kubernetesui/dashboard-api:latest -o temp.tar
       - name: Upload Zip Archive
         uses: actions/upload-artifact@v4
         with:
           name: docker-tarball
-          path: go_image.tar
+          path: temp.tar
+k
