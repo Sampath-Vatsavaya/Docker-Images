@@ -1,15 +1,58 @@
 name: Pack Docker Image
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Pull an existing image or build from a Dockerfile"
+        type: choice
+        options:
+          - pull
+          - build
+        default: pull
+      image:
+        description: "Image name:tag (pull: image to download, build: tag to give it)"
+        required: true
+        default: "kubernetesui/dashboard-api:latest"
+      dockerfile:
+        description: "Build only: path to Dockerfile in the repo"
+        default: "Dockerfile"
+      context:
+        description: "Build only: build context folder"
+        default: "."
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Pull and Save Image
+      - name: Checkout repo
+        if: inputs.mode == 'build'
+        uses: actions/checkout@v4
+
+      - name: Pull image
+        if: inputs.mode == 'pull'
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: docker pull "$IMAGE"
+
+      - name: Build image
+        if: inputs.mode == 'build'
+        env:
+          IMAGE: ${{ inputs.image }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+        run: docker build -f "$DOCKERFILE" -t "$IMAGE" "$CONTEXT"
+
+      - name: Save image
+        id: save
+        env:
+          IMAGE: ${{ inputs.image }}
         run: |
-          docker pull kubernetesui/dashboard-api:latest
-          docker save kubernetesui/dashboard-api:latest -o temp.tar
-      - name: Upload Zip Archive
+          SAFE_NAME=$(echo "$IMAGE" | tr '/:@' '___')
+          docker save "$IMAGE" -o "${SAFE_NAME}.tar"
+          echo "name=${SAFE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: docker-tarball
-          path: temp.tar
+          name: ${{ steps.save.outputs.name }}
+          path: ${{ steps.save.outputs.name }}.tar
