@@ -1,0 +1,5 @@
+Image: mysql:8.0
+
+To restore:
+  7z x mysql_8.0.7z.001
+  docker load -i mysql_8.0.tar
