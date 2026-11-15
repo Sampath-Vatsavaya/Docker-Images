@@ -1,0 +1,5 @@
+Image: redpandadata/redpanda:latest
+
+To restore:
+  7z x redpandadata_redpanda_latest.7z.001
+  docker load -i redpandadata_redpanda_latest.tar
