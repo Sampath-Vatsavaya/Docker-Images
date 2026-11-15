@@ -1,0 +1,5 @@
+Image: floci/floci:latest-compat
+
+To restore:
+  7z x floci_floci_latest-compat.7z.001
+  docker load -i floci_floci_latest-compat.tar
