@@ -1,0 +1,5 @@
+Image: floci/floci-ui:0.7.0
+
+To restore:
+  7z x floci_floci-ui_0.7.0.7z.001
+  docker load -i floci_floci-ui_0.7.0.tar
