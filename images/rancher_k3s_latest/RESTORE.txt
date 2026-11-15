@@ -1,0 +1,5 @@
+Image: rancher/k3s:latest
+
+To restore:
+  7z x rancher_k3s_latest.7z.001
+  docker load -i rancher_k3s_latest.tar
