@@ -1,0 +1,5 @@
+Image: valkey/valkey:8
+
+To restore:
+  7z x valkey_valkey_8.7z.001
+  docker load -i valkey_valkey_8.tar
