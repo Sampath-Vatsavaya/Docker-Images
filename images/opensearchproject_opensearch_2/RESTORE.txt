@@ -1,0 +1,5 @@
+Image: opensearchproject/opensearch:2
+
+To restore:
+  7z x opensearchproject_opensearch_2.7z.001
+  docker load -i opensearchproject_opensearch_2.tar
