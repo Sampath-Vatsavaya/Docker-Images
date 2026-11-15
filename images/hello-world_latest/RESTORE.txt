@@ -1,0 +1,5 @@
+Image: hello-world:latest
+
+To restore:
+  7z x hello-world_latest.7z.001
+  docker load -i hello-world_latest.tar
