@@ -1,0 +1,5 @@
+Image: ghcr.io/ozeranskii/httptap:latest
+
+To restore:
+  7z x ghcr.io_ozeranskii_httptap_latest.7z.001
+  docker load -i ghcr.io_ozeranskii_httptap_latest.tar
