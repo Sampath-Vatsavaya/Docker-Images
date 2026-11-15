@@ -1,0 +1,5 @@
+Image: mariadb:11
+
+To restore:
+  7z x mariadb_11.7z.001
+  docker load -i mariadb_11.tar
