@@ -10,9 +10,24 @@ on:
           - build
         default: pull
       image:
-        description: "Image name:tag (pull: image to download, build: tag to give it)"
+        description: "Image name:tag. Pull mode: one or more, space/comma separated (no tag = latest). Build mode: the tag to give it"
         required: true
         default: "kubernetesui/dashboard-api:latest"
+      output:
+        description: "Where to put the result"
+        type: choice
+        options:
+          - branch        # split into 10 MB 7z parts and push to a new branch
+          - artifact      # upload as a workflow artifact (old behaviour)
+          - both
+        default: branch
+      branch:
+        description: "Branch name (blank = image/<name>_<tag>, or images/batch_<run> for several)"
+        required: false
+        default: ""
+      volume_size:
+        description: "7z part size"
+        default: "10m"
       dockerfile:
         description: "Build only: path to Dockerfile in the repo"
         default: "Dockerfile"
@@ -20,39 +35,124 @@ on:
         description: "Build only: build context folder"
         default: "."
 
+permissions:
+  contents: write   # needed to push the new branch
+
 jobs:
-  build:
+  pack:
     runs-on: ubuntu-latest
+    env:
+      MODE: ${{ inputs.mode }}
+      IMAGES_IN: ${{ inputs.image }}
+      OUTPUT: ${{ inputs.output }}
+      BRANCH_IN: ${{ inputs.branch }}
+      VOLUME_SIZE: ${{ inputs.volume_size }}
     steps:
       - name: Checkout repo
-        if: inputs.mode == 'build'
         uses: actions/checkout@v4
 
-      - name: Pull image
-        if: inputs.mode == 'pull'
+      - name: Resolve image list
+        id: list
+        run: |
+          set -euo pipefail
+          refs=()
+          for ref in ${IMAGES_IN//,/ }; do
+            last="${ref##*/}"
+            if [[ "$last" != *:* && "$ref" != *@* ]]; then
+              ref="${ref}:latest"
+            fi
+            refs+=("$ref")
+          done
+          if [[ ${#refs[@]} -eq 0 ]]; then
+            echo "::error::No image given"; exit 1
+          fi
+          if [[ "$MODE" == "build" && ${#refs[@]} -ne 1 ]]; then
+            echo "::error::Build mode takes exactly one image name"; exit 1
+          fi
+          printf '%s\n' "${refs[@]}" > "$RUNNER_TEMP/images.txt"
+          echo "Images:"; cat "$RUNNER_TEMP/images.txt"
+
+          if [[ -n "$BRANCH_IN" ]]; then
+            branch="$BRANCH_IN"
+          elif [[ ${#refs[@]} -eq 1 ]]; then
+            branch="image/$(echo "${refs[0]}" | tr '/:@' '___')"
+          else
+            branch="images/batch_$(date -u +%Y%m%d)_run${GITHUB_RUN_NUMBER}"
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "Branch: $branch"
+
+      - name: Check branch does not exist
+        if: inputs.output != 'artifact'
         env:
-          IMAGE: ${{ inputs.image }}
-        run: docker pull "$IMAGE"
+          BRANCH: ${{ steps.list.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            echo "::error::Branch $BRANCH already exists on origin"; exit 1
+          fi
 
       - name: Build image
         if: inputs.mode == 'build'
         env:
-          IMAGE: ${{ inputs.image }}
           DOCKERFILE: ${{ inputs.dockerfile }}
           CONTEXT: ${{ inputs.context }}
-        run: docker build -f "$DOCKERFILE" -t "$IMAGE" "$CONTEXT"
+        run: docker build -f "$DOCKERFILE" -t "$(head -n1 "$RUNNER_TEMP/images.txt")" "$CONTEXT"
 
-      - name: Save image
-        id: save
-        env:
-          IMAGE: ${{ inputs.image }}
+      - name: Pull, save and split
         run: |
-          SAFE_NAME=$(echo "$IMAGE" | tr '/:@' '___')
-          docker save "$IMAGE" -o "${SAFE_NAME}.tar"
-          echo "name=${SAFE_NAME}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/packed"
+          work="$RUNNER_TEMP/work"
+          while read -r ref; do
+            [[ -z "$ref" ]] && continue
+            echo "::group::$ref"
+            if [[ "$MODE" == "pull" ]]; then
+              docker pull "$ref"
+            fi
+            safe=$(echo "$ref" | tr '/:@' '___')
+            rm -rf "$work"; mkdir -p "$work" "$RUNNER_TEMP/packed/$safe"
 
-      - name: Upload archive
+            docker save "$ref" -o "$work/$safe.tar"
+            7z a -t7z -mx=5 -v"$VOLUME_SIZE" "$RUNNER_TEMP/packed/$safe/$safe.7z" "$work/$safe.tar" >/dev/null
+            rm -f "$work/$safe.tar"
+            docker rmi "$ref" >/dev/null || true   # free runner disk
+
+            cat > "$RUNNER_TEMP/packed/$safe/RESTORE.txt" <<EOF
+          Image: $ref
+
+          To restore:
+            7z x $safe.7z.001
+            docker load -i $safe.tar
+          EOF
+            ls -lh "$RUNNER_TEMP/packed/$safe"
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/images.txt"
+
+      - name: Push to new branch
+        if: inputs.output != 'artifact'
+        env:
+          BRANCH: ${{ steps.list.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          mkdir -p images
+          for dir in "$RUNNER_TEMP/packed"/*/; do
+            safe=$(basename "$dir")
+            ref=$(head -n1 "$dir/RESTORE.txt" | sed 's/^Image: //')
+            rm -rf "images/$safe"
+            cp -r "$dir" "images/$safe"
+            git add "images/$safe"
+            git commit -m "Add docker image $ref (split 7z, $VOLUME_SIZE parts)"
+          done
+          git push -u origin "$BRANCH"
+          echo "### Pushed to branch \`$BRANCH\`" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/- /' "$RUNNER_TEMP/images.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        if: inputs.output != 'branch'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.save.outputs.name }}
-          path: ${{ steps.save.outputs.name }}.tar
+          name: packed-images-${{ github.run_number }}
+          path: ${{ runner.temp }}/packed
