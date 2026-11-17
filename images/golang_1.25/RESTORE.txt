@@ -1,0 +1,5 @@
+Image: golang:1.25
+
+To restore:
+  7z x golang_1.25.7z.001
+  docker load -i golang_1.25.tar
